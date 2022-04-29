@@ -18,6 +18,7 @@ try:
 except ImportError:
     from six import text_type, binary_type, integer_types
 
+from .local_store import store
 from .settings import ITERABLES, cachalot_settings
 from .transaction import AtomicCache
 
@@ -186,6 +187,10 @@ def _get_tables(db_alias, query):
 
     if not are_all_cachable(tables):
         raise UncachableQuery
+
+    for table in tables:
+        store.add_table(table)
+
     return tables
 
 

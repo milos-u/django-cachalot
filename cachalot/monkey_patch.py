@@ -28,6 +28,12 @@ from .utils import (
 
 WRITE_COMPILERS = (SQLInsertCompiler, SQLUpdateCompiler, SQLDeleteCompiler)
 
+_monkey_select_hook = None
+
+def register_monkey_select_hook(func):
+    global _monkey_select_hook
+    _monkey_select_hook = func
+
 
 def _unset_raw_connection(original):
     def inner(compiler, *args, **kwargs):
@@ -77,6 +83,9 @@ def _patch_compiler(original):
         if db_alias not in cachalot_settings.CACHALOT_DATABASES \
                 or isinstance(compiler, WRITE_COMPILERS):
             return execute_query_func()
+
+        if _monkey_select_hook:
+            _monkey_select_hook(original)
 
         try:
             cache_key = cachalot_settings.CACHALOT_QUERY_KEYGEN(compiler)
