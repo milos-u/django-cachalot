@@ -13,7 +13,7 @@ class LocalStore(local):
         super(LocalStore, self).__init__()
         self.request_tables = {}
 
-    def add_table(self, table_name, db_alias):
+    def add_table(self, db_alias, table_name):
         if db_alias not in self.request_tables:
             self.request_tables[db_alias] = []
         if table_name not in self.request_tables[db_alias]:

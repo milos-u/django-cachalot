@@ -189,7 +189,7 @@ def _get_tables(db_alias, query):
         raise UncachableQuery
 
     for table in tables:
-        store.add_table(table)
+        store.add_table(db_alias, table)
 
     return tables
 
