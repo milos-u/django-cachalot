@@ -1,7 +1,5 @@
-# coding: utf-8
-
-from __future__ import unicode_literals
 from django.dispatch import Signal
 
-
-post_invalidation = Signal(providing_args=['db_alias'])
+# sender: name of table invalidated
+# db_alias: name of database that was effected
+post_invalidation = Signal()

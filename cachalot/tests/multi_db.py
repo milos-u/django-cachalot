@@ -1,6 +1,3 @@
-# coding: utf-8
-
-from __future__ import unicode_literals
 from unittest import skipIf
 
 from django import VERSION as DJANGO_VERSION
@@ -15,6 +12,7 @@ from .models import Test
         'We can’t change the DB used since there’s only one configured')
 class MultiDatabaseTestCase(TransactionTestCase):
     multi_db = True
+    databases = "__all__"
 
     def setUp(self):
         self.t1 = Test.objects.create(name='test1')

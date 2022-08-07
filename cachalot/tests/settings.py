@@ -1,20 +1,19 @@
-# coding: utf-8
-
-from __future__ import unicode_literals
 from time import sleep
 from unittest import skipIf
+from unittest.mock import MagicMock, patch
 
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.cache import DEFAULT_CACHE_ALIAS
-from django.core.checks import run_checks, Tags, Warning, Error
+from django.core.checks import Error, Tags, Warning, run_checks
 from django.db import connection
 from django.test import TransactionTestCase
 from django.test.utils import override_settings
 
 from ..api import invalidate
-from ..settings import SUPPORTED_ONLY, SUPPORTED_DATABASE_ENGINES
-from .models import Test, TestParent, TestChild
+from ..settings import SUPPORTED_DATABASE_ENGINES, SUPPORTED_ONLY
+from ..utils import _get_tables
+from .models import Test, TestChild, TestParent, UnmanagedModel
 from .test_utils import TestUtilsMixin
 
 
@@ -43,7 +42,7 @@ class SettingsTestCase(TestUtilsMixin, TransactionTestCase):
             list(Test.objects.all())
 
         with self.settings(CACHALOT_ENABLED=False):
-            with self.assertNumQueries(2 if self.is_dj_21_below_and_is_sqlite() else 1):
+            with self.assertNumQueries(1):
                 t = Test.objects.create(name='test')
         with self.assertNumQueries(1):
             data = list(Test.objects.all())
@@ -155,6 +154,21 @@ class SettingsTestCase(TestUtilsMixin, TransactionTestCase):
             # table, it’s cachable.
             self.assert_query_cached(TestChild.objects.values('public'))
 
+    @override_settings(CACHALOT_ONLY_CACHABLE_APPS=('cachalot',))
+    def test_only_cachable_apps(self):
+        self.assert_query_cached(Test.objects.all())
+        self.assert_query_cached(TestParent.objects.all())
+        self.assert_query_cached(Test.objects.select_related('owner'), after=1)
+
+    # Must use override_settings to get the correct effect. Using the cm doesn't
+    # reload settings on cachalot's side
+    @override_settings(CACHALOT_ONLY_CACHABLE_TABLES=('cachalot_test', 'auth_user'),
+                       CACHALOT_ONLY_CACHABLE_APPS=('cachalot',))
+    def test_only_cachable_apps_set_combo(self):
+        self.assert_query_cached(Test.objects.all())
+        self.assert_query_cached(TestParent.objects.all())
+        self.assert_query_cached(Test.objects.select_related('owner'))
+
     def test_uncachable_tables(self):
         qs = Test.objects.all()
 
@@ -166,6 +180,17 @@ class SettingsTestCase(TestUtilsMixin, TransactionTestCase):
         with self.settings(CACHALOT_UNCACHABLE_TABLES=('cachalot_test',)):
             self.assert_query_cached(qs, after=1)
 
+    @override_settings(CACHALOT_UNCACHABLE_APPS=('cachalot',))
+    def test_uncachable_apps(self):
+        self.assert_query_cached(Test.objects.all(), after=1)
+        self.assert_query_cached(TestParent.objects.all(), after=1)
+
+    @override_settings(CACHALOT_UNCACHABLE_TABLES=('cachalot_test',),
+                       CACHALOT_UNCACHABLE_APPS=('cachalot',))
+    def test_uncachable_apps_set_combo(self):
+        self.assert_query_cached(Test.objects.all(), after=1)
+        self.assert_query_cached(TestParent.objects.all(), after=1)
+
     def test_only_cachable_and_uncachable_table(self):
         with self.settings(
                 CACHALOT_ONLY_CACHABLE_TABLES=('cachalot_test',
@@ -174,6 +199,14 @@ class SettingsTestCase(TestUtilsMixin, TransactionTestCase):
             self.assert_query_cached(Test.objects.all(), after=1)
             self.assert_query_cached(TestParent.objects.all())
             self.assert_query_cached(User.objects.all(), after=1)
+
+    def test_uncachable_unmanaged_table(self):
+        qs = UnmanagedModel.objects.all()
+        with self.settings(
+            CACHALOT_UNCACHABLE_TABLES=("cachalot_unmanagedmodel",),
+            CACHALOT_ADDITIONAL_TABLES=("cachalot_unmanagedmodel",)
+        ):
+            self.assert_query_cached(qs, after=1)
 
     def test_cache_compatibility(self):
         compatible_cache = {
@@ -283,3 +316,29 @@ class SettingsTestCase(TestUtilsMixin, TransactionTestCase):
         with self.settings(CACHALOT_DATABASES='invalid value'):
             errors = run_checks(tags=[Tags.compatibility])
             self.assertListEqual(errors, [error002])
+
+    def call_get_tables(self):
+        qs = Test.objects.all()
+        compiler_mock = MagicMock()
+        compiler_mock.__cachalot_generated_sql = ''
+        tables = _get_tables(qs.db, qs.query, compiler_mock)
+        self.assertTrue(tables)
+        return tables
+
+    @override_settings(CACHALOT_FINAL_SQL_CHECK=True)
+    @patch('cachalot.utils._get_tables_from_sql')
+    def test_cachalot_final_sql_check_when_true(self, _get_tables_from_sql):
+        _get_tables_from_sql.return_value = {'patched'}
+        tables = self.call_get_tables()
+        _get_tables_from_sql.assert_called_once()
+        self.assertIn('patched', tables)
+
+
+    @override_settings(CACHALOT_FINAL_SQL_CHECK=False)
+    @patch('cachalot.utils._get_tables_from_sql')
+    def test_cachalot_final_sql_check_when_false(self, _get_tables_from_sql):
+        _get_tables_from_sql.return_value = {'patched'}
+        tables = self.call_get_tables()
+        _get_tables_from_sql.assert_not_called()
+        self.assertNotIn('patched', tables)
+

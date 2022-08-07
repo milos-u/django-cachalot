@@ -1,13 +1,9 @@
 from django import VERSION as DJANGO_VERSION
 from django.core.management.color import no_style
 from django.db import connection, transaction
-try:
-    from django.utils.six import string_types
-except ImportError:
-    from six import string_types
 
-from .models import PostgresModel
 from ..utils import _get_tables
+from .models import PostgresModel
 
 
 class TestUtilsMixin:
@@ -15,29 +11,32 @@ class TestUtilsMixin:
         self.is_sqlite = connection.vendor == 'sqlite'
         self.is_mysql = connection.vendor == 'mysql'
         self.is_postgresql = connection.vendor == 'postgresql'
-        self.force_repoen_connection()
+        self.django_version = DJANGO_VERSION
+        self.force_reopen_connection()
 
     # TODO: Remove this workaround when this issue is fixed:
     #       https://code.djangoproject.com/ticket/29494
     def tearDown(self):
         if connection.vendor == 'postgresql':
-            flush_sql_list = connection.ops.sql_flush(
-                no_style(), (PostgresModel._meta.db_table,), ())
+            flush_args = [no_style(), (PostgresModel._meta.db_table,),]
+            if float(".".join(map(str, DJANGO_VERSION[:2]))) < 3.1:
+                flush_args.append(())
+            flush_sql_list = connection.ops.sql_flush(*flush_args)
             with transaction.atomic():
                 for sql in flush_sql_list:
                     with connection.cursor() as cursor:
                         cursor.execute(sql)
 
-    def force_repoen_connection(self):
+    def force_reopen_connection(self):
         if connection.vendor in ('mysql', 'postgresql'):
             # We need to reopen the connection or Django
             # will execute an extra SQL request below.
             connection.cursor()
 
     def assert_tables(self, queryset, *tables):
-        tables = {table if isinstance(table, string_types)
+        tables = {table if isinstance(table, str)
                   else table._meta.db_table for table in tables}
-        self.assertSetEqual(_get_tables(queryset.db, queryset.query), tables)
+        self.assertSetEqual(_get_tables(queryset.db, queryset.query), tables, str(queryset.query))
 
     def assert_query_cached(self, queryset, result=None, result_type=None,
                             compare_results=True, before=1, after=0):
@@ -62,30 +61,3 @@ class TestUtilsMixin:
         assert_function(data2, data1)
         if result is not None:
             assert_function(data2, result)
-
-    def is_dj_21_below_and_is_sqlite(self):
-        """
-        Checks if Django 2.1 or lower and if SQLite is the DB
-        Django 2.1 and lower had two queries on SQLite DBs:
-
-        After an insertion, e.g. Test.objects.create(name="asdf"),
-        SQLite returns the queries:
-        [{'sql': 'INSERT INTO "cachalot_test" ("name") VALUES (\'asd\')', 'time': '0.001'}, {'sql': 'BEGIN', 'time': '0.000'}]
-
-        This can be seen with django.db import connection; print(connection.queries)
-        In Django 2.2 and above, the latter was removed.
-
-        :return: bool is Django 2.1 or below and is SQLite the DB
-        """
-        django_version = DJANGO_VERSION
-        if not self.is_sqlite:
-            # Immediately know if SQLite
-            return False
-        if django_version[0] < 2:
-            # Takes Django 0 and 1 out of the picture
-            return True
-        else:
-            if django_version[0] == 2 and django_version[1] < 2:
-                # Takes Django 2.0-2.1 out
-                return True
-            return False

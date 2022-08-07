@@ -1,5 +1,3 @@
-# coding: utf-8
-
 from threading import local
 
 from .cache import cachalot_caches
