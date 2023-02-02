@@ -17,6 +17,7 @@ from .settings import cachalot_settings, ITERABLES
 from .utils import (
     _get_table_cache_keys, _get_tables_from_sql,
     UncachableQuery, is_cachable, filter_cachable,
+    gen_random_key,
 )
 
 
@@ -53,28 +54,30 @@ def _get_result_or_execute_query(execute_query_func, cache,
     except KeyError:
         data = None
 
-    new_table_cache_keys = set(table_cache_keys)
-    if data:
-        new_table_cache_keys.difference_update(data)
+    multi_key = []
+    for key in sorted(table_cache_keys):
+        if key in data:
+            multi_key.append(data[key][1])
+        else:
+            multi_key.append("_|_")
 
-        if not new_table_cache_keys:
-            try:
-                timestamp, result = data.pop(cache_key)
-                if timestamp >= max(data.values()):
-                    return result
-            except (KeyError, TypeError, ValueError):
-                # In case `cache_key` is not in `data` or contains bad data,
-                # we simply run the query and cache again the results.
-                pass
+    table_hash = gen_random_key("|".join(multi_key))
+
+    try:
+        old_table_hash, timestamp, result = data.pop(cache_key)
+        if table_hash == old_table_hash:
+            return result
+    except (KeyError, TypeError, ValueError):
+        # In case `cache_key` is not in `data` or contains bad data,
+        # we simply run the query and cache again the results.
+        pass
 
     result = execute_query_func()
     if result.__class__ not in ITERABLES and isinstance(result, Iterable):
         result = list(result)
 
     now = time()
-    to_be_set = {k: now for k in new_table_cache_keys}
-    to_be_set[cache_key] = (now, result)
-    cache.set_many(to_be_set, cachalot_settings.CACHALOT_TIMEOUT)
+    cache.set(cache_key, (table_hash, now, result), cachalot_settings.CACHALOT_TIMEOUT)
 
     return result
 

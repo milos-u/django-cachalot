@@ -124,8 +124,10 @@ def get_last_invalidation(*tables_or_models, **kwargs):
             list(_get_tables(tables_or_models)), cache_alias, db_alias):
         get_table_cache_key = cachalot_settings.CACHALOT_TABLE_KEYGEN
         table_cache_keys = [get_table_cache_key(db_alias, t) for t in tables]
-        invalidations = cachalot_caches.get_cache(
-            cache_alias, db_alias).get_many(table_cache_keys).values()
+        invalidations = []
+        for key, values in cachalot_caches.get_cache(
+            cache_alias, db_alias).get_many(table_cache_keys).items():
+            invalidations.append(values[0])
         if invalidations:
             current_last_invalidation = max(invalidations)
             if current_last_invalidation > last_invalidation:

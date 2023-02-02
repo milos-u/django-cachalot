@@ -3,7 +3,7 @@ from decimal import Decimal
 from hashlib import sha1
 from time import time
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from django.contrib.postgres.functions import TransactionNow
 from django.db import connections
@@ -286,10 +286,15 @@ def _invalidate_tables(cache, db_alias, tables):
     if not tables:
         return
     now = time()
+    rnd = gen_random_key()
     get_table_cache_key = cachalot_settings.CACHALOT_TABLE_KEYGEN
     cache.set_many(
-        {get_table_cache_key(db_alias, t): now for t in tables},
+        {get_table_cache_key(db_alias, t): (now, rnd) for t in tables},
         cachalot_settings.CACHALOT_TIMEOUT)
 
     if isinstance(cache, AtomicCache):
         cache.to_be_invalidated.update(tables)
+
+def gen_random_key(key=None):
+    key = key or str(uuid4())
+    return sha1(key.encode('utf-8')).hexdigest()
