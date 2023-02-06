@@ -268,7 +268,7 @@ def _get_tables(db_alias, query, compiler=False):
     if not are_all_cachable(tables):
         raise UncachableQuery
 
-    for table in tables:
+    for table in sorted(tables):
         store.add_table(db_alias, table)
 
     return tables

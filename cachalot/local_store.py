@@ -23,29 +23,29 @@ class LocalStore(local):
     def get_request_tables(self):
         return self.request_tables
 
-    def get_table_cache_keys(self, db_alias):
+    def get_table_cache_keys(self, db_alias, tables):
         get_table_cache_key = cachalot_settings.CACHALOT_TABLE_KEYGEN
-        if db_alias not in self.request_tables:
-            return []
         ret = []
-        for table_name in self.request_tables[db_alias]:
+        for table_name in sorted(tables):
             ret.append(get_table_cache_key(db_alias, table_name))
         return ret
 
-    def get_last_timestamp(self, request_tables):
+    def get_request_tables_hash(self, request_tables=None):
         """
-        Vrati timestamp posledni modifikace dat v tabulkach,
-        ktere jsou soucasti aktualni transakce.
+        Return aggregated hash of provided tables.
         """
+        if request_tables is None:
+            request_tables = self.request_tables
         table_keys = []
-        max_timestamp = None
-        for db_alias in request_tables.keys():
+        for db_alias in sorted(request_tables.keys()):
             cache = cachalot_caches.get_cache(db_alias=db_alias)
-            keys = self.get_table_cache_keys(db_alias)
+            tables = request_tables[db_alias]
+            keys = self.get_table_cache_keys(db_alias, tables)
             if keys:
-                data = cache.get_many(table_cache_keys)
+                data = cache.get_many(keys)
                 if data:
-                    max_timestamp = max_timestamp or max(data.values())
-        return max_timestamp
+                    for (timestamp, table_key) in data.values():
+                        table_keys.append(table_key)
+        return "|".join(table_keys)
 
 store = LocalStore()
