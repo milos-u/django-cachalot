@@ -7,7 +7,11 @@ from django.core.exceptions import EmptyResultSet
 from django.db.backends.utils import CursorWrapper
 from django.db.models.signals import post_migrate
 from django.db.models.sql.compiler import (
-    SQLCompiler, SQLInsertCompiler, SQLUpdateCompiler, SQLDeleteCompiler,
+    SQLCompiler,
+    SQLInsertCompiler,
+    SQLUpdateCompiler,
+    SQLDeleteCompiler,
+    MULTI,
 )
 from django.db.transaction import Atomic, get_connection
 
@@ -96,8 +100,13 @@ def _patch_compiler(original):
                 or isinstance(compiler, WRITE_COMPILERS):
             return execute_query_func()
 
+        if args:
+            result_type = args[0]
+        else:
+            result_type = MULTI
+
         if _monkey_select_hook:
-            _monkey_select_hook(original)
+            _monkey_select_hook(compiler, result_type)
 
         try:
             cache_key = cachalot_settings.CACHALOT_QUERY_KEYGEN(compiler)
