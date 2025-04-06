@@ -44,6 +44,12 @@ except ImportError:
     pass
 
 try:
+    from django.contrib.gis.db.backends.postgis.adapter import PostGISAdapter
+    CACHABLE_PARAM_TYPES.update((PostGISAdapter,))
+except ImportError:
+    pass
+
+try:
     from psycopg2 import Binary
     from psycopg2.extras import (
         NumericRange, DateRange, DateTimeRange, DateTimeTZRange, Inet, Json)
@@ -288,9 +294,10 @@ def _invalidate_tables(cache, db_alias, tables):
     now = time()
     rnd = gen_random_key()
     get_table_cache_key = cachalot_settings.CACHALOT_TABLE_KEYGEN
-    cache.set_many(
-        {get_table_cache_key(db_alias, t): (now, rnd) for t in tables},
-        cachalot_settings.CACHALOT_TIMEOUT)
+    cache_data = {
+        get_table_cache_key(db_alias, t): (now, rnd) for t in tables
+    }
+    cache.set_many(cache_data, cachalot_settings.CACHALOT_TIMEOUT)
 
     if isinstance(cache, AtomicCache):
         cache.to_be_invalidated.update(tables)
