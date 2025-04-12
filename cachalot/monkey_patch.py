@@ -17,6 +17,7 @@ from django.db.transaction import Atomic, get_connection
 
 from .api import invalidate, LOCAL_STORAGE
 from .cache import cachalot_caches
+from .local_store import store
 from .settings import cachalot_settings, ITERABLES
 from .utils import (
     _get_table_cache_keys, _get_tables_from_sql,
@@ -111,7 +112,10 @@ def _patch_compiler(original):
         try:
             cache_key = cachalot_settings.CACHALOT_QUERY_KEYGEN(compiler)
             table_cache_keys = _get_table_cache_keys(compiler)
-        except (EmptyResultSet, UncachableQuery):
+        except UncachableQuery:
+            store.mark_as_uncachable()
+            return execute_query_func()
+        except EmptyResultSet:
             return execute_query_func()
 
         return _get_result_or_execute_query(

@@ -9,7 +9,11 @@ class LocalStore(local):
     """
     def __init__(self):
         super(LocalStore, self).__init__()
+        self.clear()
+
+    def clear(self):
         self.request_tables = {}
+        self.uncachable = False
 
     def add_table(self, db_alias, table_name):
         if db_alias not in self.request_tables:
@@ -17,8 +21,19 @@ class LocalStore(local):
         if table_name not in self.request_tables[db_alias]:
             self.request_tables[db_alias].append(table_name)
 
-    def clear(self):
-        self.request_tables = {}
+    def mark_as_uncachable(self):
+        """
+        Marks current store state as a result
+        of UncachableQuery.
+        """
+        self.uncachable = True
+
+    def is_uncachable(self):
+        """
+        Marks current store state as a result
+        of UncachableQuery.
+        """
+        return bool(self.uncachable)
 
     def get_request_tables(self):
         return self.request_tables

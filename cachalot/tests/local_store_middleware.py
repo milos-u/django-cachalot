@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.contrib.auth.models import Group, Permission, User
+from django.db.models.functions import Now
 from django.test import TransactionTestCase
 
 from .models import Test, TestChild, TestParent, UnmanagedModel
@@ -41,6 +42,7 @@ class LocalStoreTestCase(TestUtilsMixin, TransactionTestCase):
 
     def test_empty(self):
         store.clear()
+        self.assertFalse(store.is_uncachable())
 
         with self.assertNumQueries(0):
             data1 = list(Test.objects.none())
@@ -53,9 +55,11 @@ class LocalStoreTestCase(TestUtilsMixin, TransactionTestCase):
         self.assertListEqual(data2, [])
 
         self.assertFalse(store.get_request_tables())
+        self.assertFalse(store.is_uncachable())
 
     def test_exists(self):
         store.clear()
+        self.assertFalse(store.is_uncachable())
         with self.assertNumQueries(1):
             n1 = Test.objects.exists()
         with self.assertNumQueries(0):
@@ -68,9 +72,11 @@ class LocalStoreTestCase(TestUtilsMixin, TransactionTestCase):
         )
         self.assertEqual(n2, n1)
         self.assertTrue(n2)
+        self.assertFalse(store.is_uncachable())
 
     def test_test_parent(self):
         store.clear()
+        self.assertFalse(store.is_uncachable())
         child = TestChild.objects.create(name='child')
         qs = TestChild.objects.filter(name='child')
         self.assert_query_cached(qs)
@@ -97,3 +103,15 @@ class LocalStoreTestCase(TestUtilsMixin, TransactionTestCase):
 
         # very hard to test something so volatile..
         store.get_request_tables_hash()
+        self.assertFalse(store.is_uncachable())
+
+    def test_uncachable(self):
+        """
+        Test uncachable query flags.
+        """
+        store.clear()
+        self.assertFalse(store.is_uncachable())
+
+        list(User.objects.filter(last_login__lte=Now()))
+        self.assertEqual(store.get_request_tables(), {})
+        self.assertTrue(store.is_uncachable())
