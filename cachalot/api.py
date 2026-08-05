@@ -24,7 +24,19 @@ __all__ = ('invalidate', 'get_last_invalidation', 'cachalot_disabled')
 
 def _cache_db_tables_iterator(tables, cache_alias, db_alias):
     no_tables = not tables
-    cache_aliases = settings.CACHES if cache_alias is None else (cache_alias,)
+    # PATCH (TLP): bez explicitniho cache_alias iteruj JEN CACHALOT_CACHE,
+    # ne VSECHNY settings.CACHES. Cachalot uklada query cache pouze do
+    # CACHALOT_CACHE ('default'); iterace pres vsechny aliasy nutila raw-redis
+    # backend 'persistent' (tlp.infra.redis_cache.RedisCache) implementovat
+    # no-op cache API jen aby invalidate() na nem nespadl, a hrozila poluce
+    # presence/WS Redisu cachalot klici pri kazdem invalidate (mptt rebuild
+    # apod.). Automaticka invalidace uz cache_alias=CACHALOT_CACHE predava
+    # (monkey_patch.py) — sjednocujeme s tim i manualni invalidate()/
+    # get_last_invalidation(). Viz tlp/infra/redis_cache.py.
+    if cache_alias is None:
+        cache_aliases = (cachalot_settings.CACHALOT_CACHE,)
+    else:
+        cache_aliases = (cache_alias,)
     db_aliases = settings.DATABASES if db_alias is None else (db_alias,)
     for db_alias in db_aliases:
         if no_tables:
