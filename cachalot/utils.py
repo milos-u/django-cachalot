@@ -112,9 +112,34 @@ def get_table_cache_key(db_alias, table):
     return sha1(cache_key.encode('utf-8')).hexdigest()
 
 
+# TLP patch — memoizace django_table_names() per db alias.
+#
+# django_table_names() prochazi cely app registry a na kazdy model vola
+# router.allow_migrate_model (v SYPOSu ~1180 modelu na jedno volani). Vysledek
+# je pritom odvozeny jen z app registry a routeru, coz je po startu procesu
+# nemenne — presto se pocital znovu pri kazdem volani.
+#
+# _get_tables_from_sql se vola pro kazdy raw SQL a pro kazdy AggregateQuery,
+# tedy pro kazdy .count() — vcetne paginatoru v adminu. Na profilu alerts view
+# to delalo 0,069 s ze 0,147 s, tj. ~47 % requestu.
+#
+# CACHALOT_ADDITIONAL_TABLES zamerne NEcachujeme — je to setting a musi zustat
+# prepisovatelny (override_settings v testech).
+_django_table_names_cache = {}
+
+
+def _get_django_table_names(connection):
+    """django_table_names() s memoizaci per db alias (viz komentar vyse)."""
+    tables = _django_table_names_cache.get(connection.alias)
+    if tables is None:
+        tables = connection.introspection.django_table_names()
+        _django_table_names_cache[connection.alias] = tables
+    return tables
+
+
 def _get_tables_from_sql(connection, lowercased_sql, enable_quote: bool = False):
     """Returns names of involved tables after analyzing the final SQL query."""
-    return {table for table in (connection.introspection.django_table_names()
+    return {table for table in (_get_django_table_names(connection)
             + cachalot_settings.CACHALOT_ADDITIONAL_TABLES)
             if _quote_table_name(table, connection, enable_quote) in lowercased_sql}
 
