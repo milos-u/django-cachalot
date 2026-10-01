@@ -20,7 +20,7 @@ from .cache import cachalot_caches
 from .local_store import store
 from .settings import cachalot_settings, ITERABLES
 from .utils import (
-    _get_table_cache_keys, _get_tables_from_sql,
+    _get_table_cache_keys, _get_tables_from_sql, _invalidate_tables,
     UncachableQuery, is_cachable, filter_cachable,
     gen_random_key,
 )
@@ -132,10 +132,47 @@ def _patch_write_compiler(original):
     def inner(write_compiler, *args, **kwargs):
         db_alias = write_compiler.using
         table = write_compiler.query.get_meta().db_table
-        if is_cachable(table):
+        cachable = is_cachable(table)
+        if cachable:
+            # Upstream chovani: zneplatnit PRED zapisem, aby se od jeho zacatku
+            # neservirovala znamo-stara data.
             invalidate(table, db_alias=db_alias,
                        cache_alias=cachalot_settings.CACHALOT_CACHE)
-        return original(write_compiler, *args, **kwargs)
+
+        result = original(write_compiler, *args, **kwargs)
+
+        if cachable:
+            # ...a JESTE JEDNOU po zapisu. Bez tohohle zustava diraa, kterou se
+            # da projit: mezi invalidaci a zapisem precte ctenar uz NOVOU
+            # generaci, dotazem dostane jeste STARA data a ulozi si je pod ni.
+            # Takovy zaznam pak zustava platny az do DALSIHO zapisu do tabulky -
+            # u tabulky, do ktere se pise jednou za dvacet minut, je to dvacet
+            # minut zastaralych odpovedi.
+            #
+            # Presne tohle zpusobilo duplicitni integrace.Vystraha v SYPOSu:
+            # SIVS task radek vlozil, soubezny pozadavek z portalu si pod novou
+            # generaci ulozil jeste prazdny vysledek, a dalsi beh tasku proto
+            # radek nenasel a zalozil druhy.
+            #
+            # Druha invalidace tenhle zaznam znepristupni. Prechodne okno mezi
+            # zapisem a touhle invalidaci zustava - to je vlastnost cache-aside
+            # navrhu a neodstrani ho zadne poradi - ale zastaralost uz neprezije
+            # zapis. Test: test_app app/test/cachalot_stale_read.py
+            #
+            # Zamerne _invalidate_tables() a ne invalidate(): jen zvedne
+            # generace tabulky, ale NEPOSILA post_invalidation. Signal uz odesel
+            # pri prvni invalidaci a je to udalost "do tabulky se zapsalo" -
+            # poslat ho podruhe by rozbilo odberatele (a chyta to i
+            # cachalot.tests.signals).
+            _invalidate_tables(
+                cachalot_caches.get_cache(
+                    cachalot_settings.CACHALOT_CACHE, db_alias=db_alias
+                ),
+                db_alias,
+                [table],
+            )
+
+        return result
 
     return inner
 

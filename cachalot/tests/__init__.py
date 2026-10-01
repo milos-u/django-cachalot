@@ -1,7 +1,6 @@
 from django.core.signals import setting_changed
 from django.dispatch import receiver
 
-"""
 from ..settings import cachalot_settings
 from .read import ReadTestCase, ParameterTypeTestCase
 from .write import WriteTestCase, DatabaseCommandTestCase
@@ -13,7 +12,6 @@ from .api import APITestCase, CommandTestCase
 from .signals import SignalsTestCase
 from .postgres import PostgresReadTestCase
 from .debug_toolbar import DebugToolbarTestCase
-"""
 from .local_store_middleware import LocalStoreTestCase
 
 

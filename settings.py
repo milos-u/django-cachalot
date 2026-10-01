@@ -1,9 +1,37 @@
 import os
+import sys
 
 from django import VERSION as __DJ_V
 
 
-DATABASES = {
+# Testy sahaji na django.contrib.gis, ktery si knihovny GDAL a GEOS hleda
+# podle jmen jako "gdal305". V TLP prostredich jsou ale v site-packages/osgeo
+# a jmenuji se proste gdal.dll / geos_c.dll, takze je Django samo nenajde
+# a cela sada spadne na ImproperlyConfigured jeste pred prvnim testem.
+# Cestu bere pouze ze settings, promenna prostredi na to neni.
+__OSGEO = os.path.join(os.path.dirname(os.__file__), "site-packages", "osgeo")
+if os.path.isdir(__OSGEO):
+    __PRIPONA = ".dll" if sys.platform == "win32" else ".so"
+    __GDAL = os.path.join(__OSGEO, "gdal" + __PRIPONA)
+    __GEOS = os.path.join(__OSGEO, "geos_c" + __PRIPONA)
+    if os.path.exists(__GDAL):
+        GDAL_LIBRARY_PATH = __GDAL
+    if os.path.exists(__GEOS):
+        GEOS_LIBRARY_PATH = __GEOS
+
+
+# Deklarujeme jen ty databaze, ktere se opravdu pouziji. Puvodne tu byly
+# vsechny tri naraz a ``DB_ENGINE`` jen vybiral, ktera bude ``default`` —
+# zbyle dve zustaly deklarovane a runner jim zakladal testovaci databaze.
+# Stacilo tedy testovat na sqlite a sada stejne spadla na chybejicim
+# ovladaci MySQL a na postgresove roli.
+#
+# ``DB_ENGINE``   databaze pro ``default`` (vychozi sqlite3)
+# ``DB_ENGINE_2`` volitelna druha databaze pro multi-db testy
+#
+# Bez druhe se ``MultiDatabaseTestCase`` preskoci — ma na to vlastni
+# ``skipIf(len(settings.DATABASES) == 1)``, takze se to v reportu pozna.
+__VSECHNY_DB = {
     'sqlite3': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': 'cachalot.sqlite3',
@@ -22,19 +50,34 @@ DATABASES = {
     },
 }
 if 'MYSQL_PASSWORD' in os.environ:
-    DATABASES['mysql']['PASSWORD'] = os.environ['MYSQL_PASSWORD']
+    __VSECHNY_DB['mysql']['PASSWORD'] = os.environ['MYSQL_PASSWORD']
 if 'POSTGRES_PASSWORD' in os.environ:
-    DATABASES['postgresql']['PASSWORD'] = os.environ['POSTGRES_PASSWORD']
+    __VSECHNY_DB['postgresql']['PASSWORD'] = os.environ['POSTGRES_PASSWORD']
+
+DATABASES = {'default': __VSECHNY_DB[os.environ.get('DB_ENGINE', 'sqlite3')]}
+__DRUHA = os.environ.get('DB_ENGINE_2')
+if __DRUHA:
+    DATABASES[__DRUHA] = __VSECHNY_DB[__DRUHA]
+
 for alias in DATABASES:
     if 'TEST' not in DATABASES[alias]:
         test_db_name = 'test_' + DATABASES[alias]['NAME']
         DATABASES[alias]['TEST'] = {'NAME': test_db_name}
-
-DATABASES['default'] = DATABASES.pop(os.environ.get('DB_ENGINE', 'sqlite3'))
 DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 DATABASE_ROUTERS = ['cachalot.tests.db_router.PostgresRouter']
 
-CACHES = {
+# Totez co u databazi: deklarujeme jen cache, ktere se opravdu pouziji.
+# Driv tu byly vsechny naraz, takze ``createcachetable`` pri zakladani
+# testovaci databaze sahnul i na redis a sada spadla na chybejicim
+# ``django_redis``, i kdyz se testovalo na memcached.
+#
+# ``CACHE_BACKEND`` vybira ``default`` (vychozi locmem).
+#
+# Druha cache tu zustava vzdycky: ``APITestCase`` si ji bere pres
+# ``next(alias for alias in settings.CACHES if alias != 'default')``
+# bez pojistky, takze s jedinou by spadlo na StopIteration. Jako druha
+# jde vzdy neco bez externi zavislosti.
+__VSECHNY_CACHE = {
     'redis': {
         'BACKEND': 'django_redis.cache.RedisCache',
         'LOCATION': 'redis://127.0.0.1:6379/0',
@@ -76,17 +119,17 @@ try:
 except ImportError:
     pass
 else:
-    CACHES['pylibmc'] = {
+    __VSECHNY_CACHE['pylibmc'] = {
         'BACKEND': 'django.core.cache.backends.memcached.PyLibMCCache',
         'LOCATION': '127.0.0.1:11211',
     }
 
 DEFAULT_CACHE_ALIAS = os.environ.get('CACHE_BACKEND', 'locmem')
-CACHES['default'] = CACHES.pop(DEFAULT_CACHE_ALIAS)
-if DEFAULT_CACHE_ALIAS == 'memcached' and 'pylibmc' in CACHES:
-    del CACHES['pylibmc']
-elif DEFAULT_CACHE_ALIAS == 'pylibmc':
-    del CACHES['memcached']
+CACHES = {'default': __VSECHNY_CACHE[DEFAULT_CACHE_ALIAS]}
+# Druha cache bez externi zavislosti — locmem, a kdyz uz je vybrany,
+# tak filebased.
+__DRUHA_CACHE = 'filebased' if DEFAULT_CACHE_ALIAS == 'locmem' else 'locmem'
+CACHES[__DRUHA_CACHE] = __VSECHNY_CACHE[__DRUHA_CACHE]
 
 INSTALLED_APPS = [
     'cachalot',
