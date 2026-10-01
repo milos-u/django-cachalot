@@ -11,6 +11,21 @@ class AtomicCache(dict):
     def set(self, k, v, timeout):
         self[k] = v
 
+    def add(self, k, v, timeout):
+        """Zapis jen kdyz klic jeste neexistuje - ani v bufferu, ani v parentu.
+
+        Potrebuje to ctecí cesta pri materializaci chybejici generace tabulky:
+        tam se NESMI prepsat hodnota, kterou mezitim ulozila invalidace, jinak
+        by se generace vratila na starsi stav a zaznam ulozeny pod ni by se stal
+        znovu dosazitelnym, prestoze data uz jsou dal.
+        """
+        if k in self:
+            return False
+        if self.parent_cache.get_many([k]):
+            return False
+        self[k] = v
+        return True
+
     def get_many(self, keys):
         data = {k: self[k] for k in keys if k in self}
         missing_keys = set(keys)

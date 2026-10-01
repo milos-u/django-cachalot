@@ -257,7 +257,12 @@ class APITestCase(TestUtilsMixin, TransactionTestCase):
         content = template.render({'content': 'yet another',
                                    'cache': self.cache_alias2})
         self.assertEqual(content, 'something')
-        invalidate('cachalot_test')
+        # Puvodne tu bylo ``invalidate('cachalot_test')`` bez cache_alias
+        # s ocekavanim, ze vycisti vsechny settings.CACHES. Nas commit
+        # 92f4c3b to zamerne omezil jen na CACHALOT_CACHE, aby invalidace
+        # nesahala na cizi cache (presence/WS Redis). Druhou cache je
+        # proto potreba uvest vyslovne.
+        invalidate('cachalot_test', cache_alias=self.cache_alias2)
         content = template.render({'content': 'will you change?',
                                    'cache': self.cache_alias2})
         self.assertEqual(content, 'will you change?')
@@ -308,6 +313,12 @@ class APITestCase(TestUtilsMixin, TransactionTestCase):
             list(qs.all())
 
 
+# Potrebuje druhou databazi (``db_alias2``) — stejne jako
+# ``MultiDatabaseTestCase``, ktery na to vlastni skipIf ma. Tenhle ho
+# nemel a padal na ``StopIteration`` uz v setUp, kdyz je deklarovana jen
+# jedna databaze. Druhou zapina ``DB_ENGINE_2`` v settings.py.
+@skipIf(len(settings.DATABASES) == 1,
+        'Potreba druha databaze — nastav DB_ENGINE_2')
 class CommandTestCase(TransactionTestCase):
     multi_db = True
     databases = "__all__"

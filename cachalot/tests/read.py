@@ -907,7 +907,10 @@ class ReadTestCase(TestUtilsMixin, TransactionTestCase):
     def test_explain(self):
         explain_kwargs = {}
         if self.is_sqlite:
-            expected = (r'\d+ 0 0 SCAN TABLE cachalot_test\n'
+            # SQLite od 3.36 pise "SCAN cachalot_test", starsi verze
+            # "SCAN TABLE cachalot_test" — slovo TABLE je proto volitelne,
+            # at test nevisi na verzi knihovny v prostredi.
+            expected = (r'\d+ 0 0 SCAN (?:TABLE )?cachalot_test\n'
                         r'\d+ 0 0 USE TEMP B-TREE FOR ORDER BY')
         elif self.is_mysql:
             if self.django_version < (3, 1):

@@ -59,12 +59,38 @@ def _get_result_or_execute_query(execute_query_func, cache,
     except KeyError:
         data = None
 
-    multi_key = []
-    for key in sorted(table_cache_keys):
-        if key in data:
-            multi_key.append(data[key][1])
-        else:
-            multi_key.append("_|_")
+    if not data:
+        data = {}
+
+    # Chybejici generace tabulky se driv nahrazovala konstantou "_|_". Tim se
+    # z NEZNAMEHO stavu stal konkretni znamy stav, a to porad stejny - dve ruzne
+    # mezery (napr. dve vyhozeni z memcached pod tlakem) proto daly identicky
+    # table_hash a zaznam ulozeny behem prvni se prijal jako platny behem druhe,
+    # i kdyz se data mezi nimi zmenila.
+    #
+    # Misto zastupne hodnoty generaci rovnou MATERIALIZUJEME. Tim z kodu mizi
+    # cely ten nejednoznacny pripad: hash je vzdy odvozeny ze skutecnych
+    # nahodnych hodnot, takze stejny vyjde jen pri opravdu stejnem stavu.
+    # Je to tataz vlastnost, kterou ma johnny-cache diky generaci primo v klici,
+    # ale bez jeho ceny - ten potrebuje druhy round trip na KAZDE cteni, kdezto
+    # tady se platí jen v te vzacne chvili, kdy generace chybi.
+    #
+    # Zamerne add(), ne set(): zapis ctenare nesmi prepsat hodnotu, kterou
+    # mezitim ulozila invalidace. Tim by se generace vratila na starsi stav
+    # a zastaraly zaznam by se stal znovu dosazitelnym. Po add() generace
+    # precteme znovu, abychom pracovali s tim, co skutecne vyhralo.
+    chybejici_klice = [key for key in table_cache_keys if key not in data]
+    if chybejici_klice:
+        rnd = gen_random_key()
+        for key in chybejici_klice:
+            cache.add(key, (time(), rnd), cachalot_settings.CACHALOT_TIMEOUT)
+        data.update(cache.get_many(chybejici_klice))
+        if any(key not in data for key in table_cache_keys):
+            # generaci se nepodarilo ustalit (vypadek cache) - bez spolehlive
+            # kotvy radeji necachujeme vubec, nez abychom hadali
+            return execute_query_func()
+
+    multi_key = [data[key][1] for key in sorted(table_cache_keys)]
 
     table_hash = gen_random_key("|".join(multi_key))
 
