@@ -172,11 +172,23 @@ CACHALOT_ENABLED = True
 # Settings for django-debug-toolbar
 #
 
-# We put django-debug-toolbar before to reproduce the conditions of this issue:
-# https://github.com/noripyt/django-cachalot/issues/62
-INSTALLED_APPS = [
-    'debug_toolbar',
-] + INSTALLED_APPS + ['django.contrib.staticfiles']
+# Debug toolbar je volitelny — je jen v requirements/tests.txt a vychozi
+# sada ho nepotrebuje: ``cachalot/tests/__init__.py`` modul
+# ``tests/debug_toolbar.py`` neimportuje. Kdyz chybi, ``django.setup()``
+# spadne uz na INSTALLED_APPS a neprobehne vubec nic, takze ho pridavame
+# jen kdyz je k dispozici (stejne jako nize pylibmc).
+try:
+    import debug_toolbar  # noqa: F401
+except ImportError:
+    __MA_DEBUG_TOOLBAR = False
+    INSTALLED_APPS = INSTALLED_APPS + ['django.contrib.staticfiles']
+else:
+    __MA_DEBUG_TOOLBAR = True
+    # We put django-debug-toolbar before to reproduce the conditions of
+    # this issue: https://github.com/noripyt/django-cachalot/issues/62
+    INSTALLED_APPS = [
+        'debug_toolbar',
+    ] + INSTALLED_APPS + ['django.contrib.staticfiles']
 
 DEBUG_TOOLBAR_PANELS = [
     'debug_toolbar.panels.versions.VersionsPanel',
@@ -199,9 +211,10 @@ DEBUG_TOOLBAR_CONFIG = {
     'RENDER_PANELS': False,
 }
 
-MIDDLEWARE += [
-    'debug_toolbar.middleware.DebugToolbarMiddleware',
-]
+if __MA_DEBUG_TOOLBAR:
+    MIDDLEWARE += [
+        'debug_toolbar.middleware.DebugToolbarMiddleware',
+    ]
 
 INTERNAL_IPS = ['127.0.0.1']
 ROOT_URLCONF = 'runtests_urls'
