@@ -2,6 +2,8 @@ import datetime
 from decimal import Decimal
 from hashlib import sha1
 from time import time
+
+from .keys import gen_random_key  # noqa: F401 - reexport, viz pozn. nize
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -327,6 +329,7 @@ def _invalidate_tables(cache, db_alias, tables):
     if isinstance(cache, AtomicCache):
         cache.to_be_invalidated.update(tables)
 
-def gen_random_key(key=None):
-    key = key or str(uuid4())
-    return sha1(key.encode('utf-8')).hexdigest()
+# gen_random_key bydli v cachalot.keys — potrebuje ji i local_store,
+# ktery ji odsud importovat nemuze (utils importuje store, vznikl by kruh).
+# Import nahore v souboru ji tady drzi dal dostupnou, takze stavajici
+# "from .utils import gen_random_key" plati beze zmeny.

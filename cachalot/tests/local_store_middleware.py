@@ -8,8 +8,12 @@ from django.contrib.auth.models import Group, Permission, User
 from django.db.models.functions import Now
 from django.test import TransactionTestCase
 
+from django.db import DEFAULT_DB_ALIAS
+
 from .models import Test, TestChild, TestParent, UnmanagedModel
+from ..cache import cachalot_caches
 from ..local_store import store
+from ..settings import cachalot_settings
 from .test_utils import TestUtilsMixin
 
 
@@ -115,3 +119,66 @@ class LocalStoreTestCase(TestUtilsMixin, TransactionTestCase):
         list(User.objects.filter(last_login__lte=Now()))
         self.assertEqual(store.get_request_tables(), {})
         self.assertTrue(store.is_uncachable())
+
+    def test_request_tables_hash_nekoliduje_pri_chybejici_generaci(self):
+        """
+        Chybejici generace nesmi z hashe tise vypadnout.
+
+        Driv se takova tabulka proste preskocila, takze hash DVOU tabulek,
+        z nichz jedne generace chybela, vysel stejne jako hash te druhe
+        samotne. Dva ruzne stavy pod jednim klicem znamenaji, ze konzument
+        (cache odpovedi v ``tlp.common.middleware``) muze na jeden hash
+        dostat odpoved patrici k jinemu stavu dat. Generace se proto
+        materializuje a do hashe prispeje vzdy.
+
+        Vyhozeni z cache neni teoreticke — memcached pod tlakem klice
+        zahazuje a ctecí cesta cachalotu si je sama nezaklada pri kazdem
+        pouziti tohohle hashe.
+        """
+        store.clear()
+        cache = cachalot_caches.get_cache()
+
+        # Obe tabulky nejdriv precteme, aby jejich generace existovaly.
+        list(Test.objects.all())
+        list(TestParent.objects.all())
+
+        jen_jedna = {DEFAULT_DB_ALIAS: [Test._meta.db_table]}
+        obe = {
+            DEFAULT_DB_ALIAS: [
+                Test._meta.db_table,
+                TestParent._meta.db_table,
+            ],
+        }
+
+        # Generace druhe tabulky zmizi z cache.
+        klic_druhe = cachalot_settings.CACHALOT_TABLE_KEYGEN(
+            DEFAULT_DB_ALIAS, TestParent._meta.db_table,
+        )
+        cache.delete(klic_druhe)
+
+        hash_jedne = store.get_request_tables_hash(jen_jedna)
+        hash_obou = store.get_request_tables_hash(obe)
+
+        self.assertNotEqual(
+            hash_jedne, hash_obou,
+            "hash dvou tabulek s chybejici generaci splynul s hashem jedne",
+        )
+        # Materializovana generace musi v cache zustat, jinak by se tyz
+        # posun opakoval pri kazdem dalsim vypoctu.
+        self.assertIsNotNone(cache.get(klic_druhe))
+
+    def test_request_tables_hash_se_posune_po_zapisu(self):
+        """
+        Po zapisu do tabulky se hash zmenit MUSI — jinak by cache
+        odpovedi drzela zastaraly obsah.
+        """
+        store.clear()
+        list(Test.objects.all())
+        pred = store.get_request_tables_hash()
+
+        Test.objects.create(name="novy zaznam")
+
+        store.clear()
+        list(Test.objects.all())
+        po = store.get_request_tables_hash()
+        self.assertNotEqual(pred, po, "hash se po zapisu neposunul")

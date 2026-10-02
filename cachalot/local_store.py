@@ -1,6 +1,8 @@
 from threading import local
+from time import time
 
 from .cache import cachalot_caches
+from .keys import gen_random_key
 from .settings import cachalot_settings
 
 class LocalStore(local):
@@ -48,6 +50,19 @@ class LocalStore(local):
     def get_request_tables_hash(self, request_tables=None):
         """
         Return aggregated hash of provided tables.
+
+        Chybejici generace se MATERIALIZUJE, stejne jako to dela ctecí
+        cesta v ``monkey_patch._get_result_or_execute_query``. Driv se
+        tady proste preskocila, takze hash slozeny ze dvou tabulek vysel
+        stejne jako hash z jedne — a jakmile generace pozdeji vznikla,
+        hash se posunul a zaznam ulozeny pod tim predchozim uz nikdo
+        nenasel. Konzument tohohle hashe (cache odpovedi v
+        ``tlp.common.middleware``) pak misto trefy do cache ukladal novy
+        zaznam.
+
+        ``add()``, ne ``set()``: zapis ctenare nesmi prepsat hodnotu,
+        kterou mezitim ulozila invalidace. Po zapisu se generace ctou
+        znovu, aby se pracovalo s tim, co skutecne vyhralo.
         """
         if request_tables is None:
             request_tables = self.request_tables
@@ -56,11 +71,20 @@ class LocalStore(local):
             cache = cachalot_caches.get_cache(db_alias=db_alias)
             tables = request_tables[db_alias]
             keys = self.get_table_cache_keys(db_alias, tables)
-            if keys:
-                data = cache.get_many(keys)
-                if data:
-                    for (timestamp, table_key) in data.values():
-                        table_keys.append(table_key)
+            if not keys:
+                continue
+            data = cache.get_many(keys)
+            chybejici_klice = [key for key in keys if key not in data]
+            if chybejici_klice:
+                rnd = gen_random_key()
+                for key in chybejici_klice:
+                    cache.add(
+                        key, (time(), rnd), cachalot_settings.CACHALOT_TIMEOUT
+                    )
+                data.update(cache.get_many(chybejici_klice))
+            for key in keys:
+                if key in data:
+                    table_keys.append(data[key][1])
         return "|".join(table_keys)
 
 store = LocalStore()
